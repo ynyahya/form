@@ -1,0 +1,261 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth ────────────────────────────────────────────────────
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  PETUGAS
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String
+  email          String    @unique
+  hashedPassword String
+  role           Role      @default(PETUGAS)
+  instansi       String?
+  unitKerja      String?
+  jabatan        String?
+  nip            String?
+  image          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  forms          Form[]
+  submissions    Submission[]
+  approvals      Approval[]
+  auditLogs      AuditLog[]
+
+  @@map("users")
+}
+
+// ─── Entity / Data Model ────────────────────────────────────
+
+model Entity {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  description String?
+  icon        String?
+  fields      EntityField[]
+  records     EntityRecord[]
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@map("entities")
+}
+
+model EntityField {
+  id           String   @id @default(cuid())
+  entityId     String
+  entity       Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  name         String
+  slug         String
+  type         String   // text, number, currency, date, relation, etc.
+  required     Boolean  @default(false)
+  options      Json?    // for dropdowns, config, etc.
+  defaultValue String?
+  order        Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([entityId, slug])
+  @@map("entity_fields")
+}
+
+model EntityRecord {
+  id        String   @id @default(cuid())
+  entityId  String
+  entity    Entity   @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("entity_records")
+}
+
+// ─── Form Builder ───────────────────────────────────────────
+
+model Form {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  slug        String       @unique
+  status      FormStatus   @default(DRAFT)
+  createdById String
+  createdBy   User         @relation(fields: [createdById], references: [id])
+  fields      FormField[]
+  templates   Template[]
+  submissions Submission[]
+  version     Int          @default(1)
+  settings    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@map("forms")
+}
+
+enum FormStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+model FormField {
+  id               String   @id @default(cuid())
+  formId           String
+  form             Form     @relation(fields: [formId], references: [id], onDelete: Cascade)
+  name             String
+  slug             String
+  type             String
+  label            String
+  placeholder      String?
+  helpText         String?
+  tooltip          String?
+  required         Boolean  @default(false)
+  readonly         Boolean  @default(false)
+  hidden           Boolean  @default(false)
+  defaultValue     String?
+  validation       Json?
+  conditionalLogic Json?
+  options          Json?    // dropdown options, table columns, etc.
+  formula          String?
+  prefix           String?
+  suffix           String?
+  width            String?  // full, half, third, quarter
+  alignment        String?
+  mask             String?
+  order            Int      @default(0)
+  parentId         String?  // for nested fields (sections, tabs, etc.)
+  entityFieldId    String?  // link to entity field for auto-populate
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([formId, slug])
+  @@map("form_fields")
+}
+
+// ─── Template / Document Output ─────────────────────────────
+
+model Template {
+  id          String         @id @default(cuid())
+  formId      String
+  form        Form           @relation(fields: [formId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  type        TemplateType   @default(PDF)
+  pageSize    String         @default("A4")
+  orientation String         @default("portrait")
+  margins     Json?
+  header      Json?
+  footer      Json?
+  body        Json           // template design elements
+  styles      Json?
+  version     Int            @default(1)
+  documents   Document[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("templates")
+}
+
+enum TemplateType {
+  PDF
+  EXCEL
+  WORD
+}
+
+// ─── Submissions ────────────────────────────────────────────
+
+model Submission {
+  id          String           @id @default(cuid())
+  formId      String
+  form        Form             @relation(fields: [formId], references: [id], onDelete: Cascade)
+  submittedBy String
+  user        User             @relation(fields: [submittedBy], references: [id])
+  data        Json
+  status      SubmissionStatus @default(DRAFT)
+  signatures  Json?
+  attachments Json?
+  documents   Document[]
+  approvals   Approval[]
+  docNumber   String?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("submissions")
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  VERIFIED
+  APPROVED
+  SIGNED
+  COMPLETED
+  REJECTED
+}
+
+// ─── Documents ──────────────────────────────────────────────
+
+model Document {
+  id           String     @id @default(cuid())
+  templateId   String
+  template     Template   @relation(fields: [templateId], references: [id])
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  fileName     String
+  fileUrl      String?
+  fileType     String
+  generatedAt  DateTime   @default(now())
+
+  @@map("documents")
+}
+
+// ─── Approval Workflow ──────────────────────────────────────
+
+model Approval {
+  id           String         @id @default(cuid())
+  submissionId String
+  submission   Submission     @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  approverId   String
+  approver     User           @relation(fields: [approverId], references: [id])
+  status       ApprovalStatus @default(PENDING)
+  comment      String?
+  signature    String?
+  order        Int            @default(0)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@map("approvals")
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ─── Audit Log ──────────────────────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  resource  String
+  resourceId String?
+  details   Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@map("audit_logs")
+}
